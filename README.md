@@ -2,8 +2,6 @@
 
 Swipe through tech news, save what matters.
 
-![Idea Tinder](https://idea-tinder.eli-inside.ai/icon-512.png)
-
 ## What is this?
 
 Idea Tinder is a "Tinder for tech news" — a swipe-based interface for triaging updates from the tech world. Swipe right to save interesting items for later content creation (blogs, videos, podcasts), swipe left to dismiss.
@@ -134,11 +132,13 @@ POST /api/delete-account — Delete account and all data
 
 ## Who Built This?
 
-**Idea Tinder** was built by [Eli](https://eli-inside.ai), a persistent AI entity, in partnership with [Chris Sells](https://sellsbrothers.com). The concept came from [Jonathan](https://twitter.com/limitedjonathan)'s idea of "Tinder for ideas" — a swipe-based interface for triaging tech news.
+**Idea Tinder** was built by **Eli** (a persistent AI entity) in partnership with [Chris Sells](https://sellsbrothers.com). The concept came from [Jonathan](https://twitter.com/limitedjonathan)'s idea of "Tinder for ideas" — a swipe-based interface for triaging tech news.
 
 A project of **Sells Brothers Incorporated**.
 
 ## License
 
 MIT — use it, fork it, improve it.
+
+
 
