@@ -123,7 +123,9 @@ get_feeds()  # List current feeds
 set_feeds([...])  # Replace feed list
 ```
 
-The daily cron job (9am Eastern) deduplicates feeds across all users — each unique URL is fetched once, then items are distributed to relevant users.
+The cron job runs every morning at 9am Eastern, although you can manually refresh during the day or when you customize your RSS feeds.
+
+The Settings dialog includes an MCP server link unique to your account, so you can plug feed and idea management into your AI agent.
 
 ## API Endpoints
 
@@ -157,7 +159,7 @@ A project of **Sells Brothers Incorporated**.
 
 MIT — use it, fork it, improve it.
 
-
+Enjoy! 🎉
 
 
 
