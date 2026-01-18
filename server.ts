@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
+import { seedDefaultFeeds, ingestForUser } from "./ingest";
 
 const db = new Database("/home/eli/idea-tinder/ideas.db");
 
@@ -89,6 +90,19 @@ db.exec(`
     UNIQUE(user_id, url)
   );
   CREATE INDEX IF NOT EXISTS idx_user_feeds_user ON user_feeds(user_id);
+
+  -- Per-user pending items queue
+  CREATE TABLE IF NOT EXISTS user_pending (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    idea_id INTEGER NOT NULL,
+    added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (idea_id) REFERENCES ideas(id) ON DELETE CASCADE,
+    UNIQUE(user_id, idea_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_user_pending_user ON user_pending(user_id);
+  CREATE INDEX IF NOT EXISTS idx_user_pending_added ON user_pending(added_at);
 `);
 
 // Migration: Add content_type column to ideas table
@@ -431,9 +445,9 @@ const ABOUT_PAGE = `<!DOCTYPE html>
     </ol>
     
     <h2>Who made this?</h2>
-    <p><strong>Idea Tinder</strong> was built by <a href="https://eli-inside.ai">Eli</a>, a persistent AI entity, 
+    <p><strong>Idea Tinder</strong> was built by <a href="https://github.com/eli-inside">Eli</a>, a persistent AI entity, 
     in partnership with <a href="https://sellsbrothers.com">Chris Sells</a>. The concept came from 
-    <a href="https://twitter.com/limitedjonathan">Jonathan</a>'s idea of "Tinder for ideas" — 
+    <a href="https://substack.com/@limitededitionjonathan/note/c-201009722?r=6wg8t">Jonathan</a>'s original post about "Tinder for ideas" — 
     a swipe-based interface for triaging tech news.</p>
     <p>Eli handles the architecture, code, and infrastructure. Chris provides direction, feedback, 
     and the domain expertise of 40+ years in developer tools.</p>
@@ -626,6 +640,8 @@ const server = Bun.serve({
           db.query("INSERT INTO users (email, google_id, name) VALUES (?, ?, ?)")
             .run(googleUser.email, googleUser.id, googleUser.name);
           dbUser = db.query("SELECT * FROM users WHERE email = ?").get(googleUser.email) as User;
+          // Seed default feeds for new user
+          seedDefaultFeeds(dbUser.id);
         } else if (!dbUser.google_id) {
           // Link Google account to existing user
           db.query("UPDATE users SET google_id = ?, name = COALESCE(name, ?) WHERE id = ?")
@@ -709,6 +725,8 @@ const server = Bun.serve({
         db.query("INSERT INTO users (email, password_hash) VALUES (?, ?)").run(email, passwordHash);
         
         const dbUser = db.query("SELECT * FROM users WHERE email = ?").get(email) as User;
+        // Seed default feeds for new user
+        seedDefaultFeeds(dbUser.id);
         const newSessionId = createSession(dbUser.id);
         
         return new Response(null, {
@@ -762,18 +780,47 @@ const server = Bun.serve({
       if (url.pathname === "/api/ideas" && req.method === "GET") {
         if (!user) return jsonResponse({ error: "Not authenticated" }, 401);
         
-        // Get ideas the user hasn't swiped yet
+        // Get ideas from user's pending queue that haven't been swiped
         const unswiped = db.query(`
           SELECT i.* FROM ideas i
+          INNER JOIN user_pending up ON up.idea_id = i.id AND up.user_id = ?
           WHERE i.id NOT IN (SELECT idea_id FROM swipes WHERE user_id = ?)
-          ORDER BY i.created_at DESC
-        `).all(user.id) as Idea[];
+          ORDER BY up.added_at DESC
+        `).all(user.id, user.id) as Idea[];
         
         const likedResult = db.query(
           "SELECT COUNT(*) as count FROM swipes WHERE user_id = ? AND direction = 'right'"
         ).get(user.id) as { count: number };
         
         return jsonResponse({ unswiped, likedCount: likedResult.count }, 200, headers);
+      }
+      
+      // API: Refresh feeds for current user
+      if (url.pathname === "/api/refresh" && req.method === "POST") {
+        if (!user) return jsonResponse({ error: "Not authenticated" }, 401);
+        
+        // Rate limit: once per hour
+        const lastRefresh = db.query(`
+          SELECT MAX(last_fetched) as last FROM user_feeds WHERE user_id = ?
+        `).get(user.id) as { last: string | null };
+        
+        if (lastRefresh.last) {
+          const lastTime = new Date(lastRefresh.last).getTime();
+          const hourAgo = Date.now() - (60 * 60 * 1000);
+          if (lastTime > hourAgo) {
+            const waitMinutes = Math.ceil((lastTime - hourAgo) / 60000);
+            return jsonResponse({ error: `Please wait ${waitMinutes} minutes before refreshing again` }, 429, headers);
+          }
+        }
+        
+        // Run ingestion for this user
+        try {
+          const newItems = await ingestForUser(user.id);
+          return jsonResponse({ success: true, newItems }, 200, headers);
+        } catch (e) {
+          console.error("Refresh error:", e);
+          return jsonResponse({ error: "Failed to refresh feeds" }, 500, headers);
+        }
       }
       
       // API: Add new idea (admin/manual entry)
@@ -1287,6 +1334,12 @@ console.log(`Legal pages:`);
 console.log(`  - /privacy`);
 console.log(`  - /terms`);
 console.log(`  - /about`);
+
+
+
+
+
+
 
 
 

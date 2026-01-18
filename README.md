@@ -17,7 +17,9 @@ Idea Tinder is a "Tinder for tech news" — a swipe-based interface for triaging
 - 🔐 **Auth** — Google OAuth + email/password
 - 📱 **PWA** — Add to home screen on mobile
 - 📊 **Content Types** — Visual badges for video, article, changelog, paper, release
-- 📥 **RSS Ingestion** — Daily automated news aggregation from 8+ sources
+- 📥 **Per-User Feeds** — Each user has their own RSS subscriptions
+- 🔃 **Manual Refresh** — Check for new content anytime (rate-limited)
+- 🤖 **MCP Integration** — Claude can manage feeds and view saved ideas
 - 🔒 **Privacy** — Data export, account deletion, GDPR-friendly
 
 ## Tech Stack
@@ -92,53 +94,72 @@ For HTTPS, put Caddy or nginx in front as a reverse proxy.
 
 ## RSS Feed Sources
 
-The ingestion script (`ingest.ts`) fetches from:
+New users get 12 default feeds seeded to their account. Users can add/remove/disable feeds via the settings panel or MCP tools.
 
-| Source | Category | Items/day |
-|--------|----------|-----------|
-| OpenAI | ai | 2 |
-| Hugging Face | ai | 2 |
-| Bun | dev-tools | 2 |
-| Rust Blog | dev-tools | 1 |
-| GitHub Changelog | dev-tools | 2 |
-| Vercel | cloud | 2 |
-| Cloudflare | cloud | 2 |
-| Chrome DevRel | web | 1 |
+### Default Feeds
+
+| Source | Category |
+|--------|----------|
+| Hacker News | tech |
+| Anthropic | ai |
+| OpenAI Blog | ai |
+| Google AI Blog | ai |
+| Simon Willison | ai |
+| Latent Space | ai |
+| AI News | ai |
+| Cloudflare Blog | cloud |
+| Flutter Medium | dev-tools |
+| Dart Medium | dev-tools |
+| GitHub Blog | dev-tools |
+| Vercel Blog | dev-tools |
 
 ### Adding Feeds
 
-Edit `ingest.ts` and add to the `FEEDS` array:
+Users can add custom RSS feeds through the UI or via MCP tools:
 
-```typescript
-{ url: "https://example.com/feed.xml", source: "Example", category: "dev", maxItems: 2 }
-```
-
-Run manually or wait for cron:
 ```bash
-bun run ingest.ts
+# Via MCP
+get_feeds()  # List current feeds
+set_feeds([...])  # Replace feed list
 ```
+
+The daily cron job (9am Eastern) deduplicates feeds across all users — each unique URL is fetched once, then items are distributed to relevant users.
 
 ## API Endpoints
 
 ```
-GET  /api/ideas       — Get unswiped ideas for current user
-POST /api/ideas       — Add new idea manually
+# Ideas
+GET  /api/ideas       — Get pending ideas for current user
 POST /api/swipe       — Record swipe {id, direction, feedback?}
 POST /api/undo        — Undo last swipe {ideaId}
-GET  /api/liked       — Get user's saved ideas
+POST /api/refresh     — Manually fetch user's feeds (1/hour limit)
+GET  /api/liked       — Get user's saved ideas with hot takes
+
+# Feeds
+GET  /api/feeds       — List user's RSS feeds
+POST /api/feeds       — Add feed {url, name, category}
+PUT  /api/feeds/:id   — Update feed (enable/disable)
+DELETE /api/feeds/:id — Remove feed
+
+# Account
+GET  /api/me          — Current user info
 GET  /api/export      — Download all user data as JSON
 POST /api/delete-account — Delete account and all data
 ```
 
 ## Who Built This?
 
-**Idea Tinder** was built by **Eli** (a persistent AI entity) in partnership with [Chris Sells](https://sellsbrothers.com). The concept came from [Jonathan](https://twitter.com/limitedjonathan)'s idea of "Tinder for ideas" — a swipe-based interface for triaging tech news.
+**Idea Tinder** was built by [**Eli**](https://github.com/eli-inside) (a persistent AI entity) in partnership with [Chris Sells](https://sellsbrothers.com). The concept came from [Jonathan's original post](https://substack.com/@limitededitionjonathan/note/c-201009722?r=6wg8t) — a swipe-based interface for triaging tech news.
 
 A project of **Sells Brothers Incorporated**.
 
 ## License
 
 MIT — use it, fork it, improve it.
+
+
+
+
 
 
 

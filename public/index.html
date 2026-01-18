@@ -35,6 +35,8 @@
       background-clip: text;
     }
     .stats { font-size: 0.85em; color: #888; margin-top: 5px; }
+    .saved-link { color: #4ecdc4; text-decoration: none; }
+    .saved-link:hover { text-decoration: underline; }
     .user-info { display: none; font-size: 0.8em; margin-top: 8px; color: #666; }
     .user-email { color: #888; }
     .logout-btn { color: #ff6b6b; text-decoration: none; margin-left: 10px; }
@@ -58,6 +60,8 @@
       user-select: none;
       touch-action: none;
       transition: transform 0.1s ease-out;
+      overflow: hidden;
+      word-break: break-word;
     }
     .card.dragging { cursor: grabbing; transition: none; }
     .card.swiping-left { animation: swipeLeft 0.3s ease-out forwards; }
@@ -87,7 +91,7 @@
     }
     .card-title { font-size: 1.4em; font-weight: 700; margin-bottom: 15px; line-height: 1.3; }
     .card-source { font-size: 0.85em; color: #feca57; margin-bottom: 15px; }
-    .card-summary { font-size: 1em; line-height: 1.6; color: #ccc; margin-bottom: 20px; }
+    .card-summary { font-size: 1em; line-height: 1.6; color: #ccc; margin-bottom: 20px; word-break: break-word; overflow-wrap: break-word; }
     .card-url { display: inline-block; color: #4ecdc4; text-decoration: none; font-size: 0.85em; }
     .card-url:hover { opacity: 0.7; }
     .swipe-indicator {
@@ -119,7 +123,10 @@
     .action-btn:active { transform: scale(0.95); }
     .btn-nope { background: linear-gradient(145deg, #ff6b6b, #ee5a5a); box-shadow: 0 5px 20px rgba(255,107,107,0.4); }
     .btn-like { background: linear-gradient(145deg, #4ecdc4, #3dbdb5); box-shadow: 0 5px 20px rgba(78,205,196,0.4); }
-    .empty-state { text-align: center; color: #666; }
+    .btn-refresh { background: linear-gradient(145deg, #feca57, #f9b739); box-shadow: 0 5px 20px rgba(254,202,87,0.4); margin-top: 20px; }
+    .btn-refresh.spinning { animation: spin 1s linear infinite; }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .empty-state { text-align: center; color: #666; display: flex; flex-direction: column; align-items: center; }
     .empty-state h2 { margin-bottom: 10px; }
     .modal-overlay {
       position: fixed; top: 0; left: 0; right: 0; bottom: 0;
@@ -152,7 +159,7 @@
     .modal-btn:hover { opacity: 0.9; }
     .modal-btn.skip { background: #3d3d55; color: #888; }
     .modal-btn.submit { background: linear-gradient(145deg, #4ecdc4, #3dbdb5); color: #fff; }
-    .admin-toggle { position: fixed; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); right: 20px; background: #3d3d55; border: none; color: #888; padding: 10px 15px; border-radius: 10px; cursor: pointer; font-size: 0.85em; }
+    .admin-toggle { position: fixed; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); right: 20px; background: #3d3d55; border: none; color: #888; padding: 12px 14px; border-radius: 50%; cursor: pointer; font-size: 1.7em; }
     .admin-panel { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: #1a1a2e; z-index: 200; overflow-y: auto; padding: 20px; }
     .admin-panel.active { display: block; }
     .admin-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
@@ -172,6 +179,9 @@
     .admin-form label { display: block; margin-bottom: 5px; color: #888; font-size: 0.85em; }
     .admin-form button { width: 100%; padding: 15px; background: linear-gradient(145deg, #4ecdc4, #3dbdb5); border: none; border-radius: 10px; color: #fff; font-size: 1em; font-weight: 600; cursor: pointer; }
     .liked-list { max-width: 600px; margin: 30px auto 0; }
+    #savedIdeasList::-webkit-scrollbar { width: 8px; }
+    #savedIdeasList::-webkit-scrollbar-track { background: #1f1f35; border-radius: 4px; }
+    #savedIdeasList::-webkit-scrollbar-thumb { background: #4ecdc4; border-radius: 4px; }
     .liked-list h3 { margin-bottom: 15px; color: #4ecdc4; }
     .liked-item { background: #2d2d44; border-radius: 10px; padding: 15px; margin-bottom: 10px; }
     .liked-item-title { font-weight: 600; margin-bottom: 5px; }
@@ -181,7 +191,7 @@
     .account-btn { display: inline-block; padding: 12px 20px; border: none; border-radius: 10px; font-size: 0.9em; cursor: pointer; margin-right: 10px; margin-bottom: 10px; }
     .account-btn.export { background: #3d3d55; color: #4ecdc4; }
     .account-btn.delete { background: rgba(255,107,107,0.2); color: #ff6b6b; }
-    .feeds-section { max-width: 600px; margin: 40px auto; padding-top: 30px; border-top: 1px solid #3d3d55; }
+    .feeds-section { max-width: 600px; margin: 20px auto; }
     .feeds-section h3 { margin-bottom: 10px; color: #feca57; }
     .feed-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #2d2d44; border-radius: 8px; margin-bottom: 8px; }
     .feed-info { display: flex; align-items: center; gap: 10px; }
@@ -206,7 +216,7 @@
     <header>
       <h1>💡 Idea Tinder</h1>
       <div class="stats">
-        <span id="remaining">0</span> ideas waiting • <span id="liked">0</span> saved
+        <span id="remaining">0</span> ideas waiting • <a href="#" onclick="showSavedIdeas(); return false;" class="saved-link"><span id="liked">0</span> saved</a>
       </div>
       <div class="user-info" id="userInfo"></div>
     </header>
@@ -227,36 +237,21 @@
       </div>
     </div>
   </div>
-  <button class="admin-toggle" onclick="toggleAdmin()">⚙️ Menu</button>
+  <div class="modal-overlay" id="savedModal">
+    <div class="modal" style="max-width: 550px; max-height: 80vh; display: flex; flex-direction: column;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+        <h2 style="margin: 0;">✅ Saved Ideas</h2>
+        <button onclick="closeSavedModal()" style="background: none; border: none; color: #888; font-size: 1.5em; cursor: pointer;">✕</button>
+      </div>
+      <div id="savedIdeasList" style="flex: 1; overflow-y: auto; margin-bottom: 15px;"></div>
+      <button class="modal-btn submit" onclick="downloadSavedIdeas()" style="width: 100%;">Download JSON 📥</button>
+    </div>
+  </div>
+  <button class="admin-toggle" onclick="toggleAdmin()">⚙️</button>
   <div class="admin-panel" id="adminPanel">
     <div class="admin-header">
-      <h2>Settings & Ideas</h2>
+      <h2>Settings</h2>
       <button class="admin-close" onclick="toggleAdmin()">✕ Close</button>
-    </div>
-    <div class="admin-form">
-      <h3 style="color: #4ecdc4; margin-bottom: 20px;">Add Idea Manually</h3>
-      <label>Title</label>
-      <input type="text" id="newTitle" placeholder="What's the headline?">
-      <label>Source</label>
-      <input type="text" id="newSource" placeholder="e.g., OpenAI Changelog, Vercel Blog">
-      <label>Category</label>
-      <select id="newCategory">
-        <option value="ai">AI / ML</option>
-        <option value="dev-tools">Dev Tools</option>
-        <option value="cloud">Cloud / Infra</option>
-        <option value="mobile">Mobile</option>
-        <option value="web">Web</option>
-        <option value="other">Other</option>
-      </select>
-      <label>Summary</label>
-      <textarea id="newSummary" rows="4" placeholder="What's the gist?"></textarea>
-      <label>URL (optional)</label>
-      <input type="text" id="newUrl" placeholder="https://...">
-      <button onclick="addIdea()">Add Idea ➕</button>
-    </div>
-    <div class="liked-list">
-      <h3>✅ Saved Ideas</h3>
-      <div id="likedIdeas"></div>
     </div>
     <div class="feeds-section">
       <h3>📰 My RSS Feeds</h3>
@@ -313,6 +308,21 @@
   <script src="/app.js"></script>
 </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -85,17 +85,36 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+function formatDate(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '';
+  
+  const now = new Date();
+  const diffMs = now - d;
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  
+  if (diffHours < 1) {
+    const diffMins = Math.floor(diffMs / (1000 * 60));
+    return ' · ' + diffMins + 'm ago';
+  } else if (diffHours < 24) {
+    return ' · ' + diffHours + 'h ago';
+  } else {
+    return ' · ' + d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
+}
+
 function renderCard() {
   const container = document.getElementById('cardContainer');
   
   if (ideas.length === 0) {
-    container.innerHTML = '<div class="empty-state"><h2>🎉 All caught up!</h2><p>Add more ideas in the admin panel<br>or wait for new content tomorrow</p></div>';
+    container.innerHTML = '<div class="empty-state"><h2>🎉 All caught up!</h2><p>Check back later for new content</p><button class="action-btn btn-refresh" onclick="refreshFeeds()" id="refreshBtn" title="Refresh feeds">🔄</button></div>';
     return;
   }
   
   currentIdea = ideas[0];
   const urlHtml = currentIdea.url 
-    ? '<a href="' + escapeHtml(currentIdea.url) + '" target="_blank" class="card-url">Read more →</a>' 
+    ? '<a href="' + escapeHtml(currentIdea.url) + '" target="_blank" class="card-url" onclick="event.stopPropagation()" onmousedown="event.stopPropagation()" ontouchstart="event.stopPropagation()">Read more →</a>' 
     : '';
   
   // Content type badge
@@ -119,7 +138,7 @@ function renderCard() {
         contentTypeBadge +
       '</div>' +
       '<h2 class="card-title">' + escapeHtml(currentIdea.title) + '</h2>' +
-      '<p class="card-source">📍 ' + escapeHtml(currentIdea.source) + '</p>' +
+      '<p class="card-source">📍 ' + escapeHtml(currentIdea.source) + formatDate(currentIdea.published_at) + '</p>' +
       '<p class="card-summary">' + escapeHtml(currentIdea.summary) + '</p>' +
       urlHtml +
     '</div>';
@@ -140,8 +159,12 @@ function setupDragListeners() {
 }
 
 function startDrag(e) {
+  // Don't start drag if clicking on a link
+  if (e.target.tagName === 'A' || e.target.closest('a')) return;
+  
   isDragging = true;
   startX = e.type === 'mousedown' ? e.clientX : e.touches[0].clientX;
+  currentX = startX;  // Initialize so clicks without movement have diff=0
   const card = document.getElementById('currentCard');
   if (card) card.classList.add('dragging');
 }
@@ -183,7 +206,9 @@ function endDrag() {
   
   card.classList.remove('dragging');
   
-  if (Math.abs(diff) > 100) {
+  // Require significant movement (150px) to trigger swipe
+  // This prevents accidental swipes from clicks or small movements
+  if (Math.abs(diff) > 150) {
     swipeCard(diff > 0 ? 'right' : 'left');
   } else {
     card.style.transform = '';
@@ -299,6 +324,57 @@ async function loadLikedIdeas() {
   }).join('');
 }
 
+async function showSavedIdeas() {
+  const res = await fetch('/api/liked');
+  const liked = await res.json();
+  
+  const container = document.getElementById('savedIdeasList');
+  if (liked.length === 0) {
+    container.innerHTML = '<p style="color:#666; text-align: center;">No saved ideas yet. Swipe right on ideas you like!</p>';
+  } else {
+    container.innerHTML = liked.map(function(idea) {
+      const feedbackHtml = idea.feedback 
+        ? '<div style="color: #888; font-size: 0.9em; font-style: italic; margin-top: 5px;">"' + escapeHtml(idea.feedback) + '"</div>'
+        : '';
+      const urlHtml = idea.url
+        ? '<a href="' + escapeHtml(idea.url) + '" target="_blank" style="color: #4ecdc4; font-size: 0.85em;">Open →</a>'
+        : '';
+      return '<div style="background: #1f1f35; border-radius: 10px; padding: 12px; margin-bottom: 10px;">' +
+        '<div style="font-weight: 600; margin-bottom: 3px;">' + escapeHtml(idea.title) + '</div>' +
+        '<div style="color: #feca57; font-size: 0.85em;">' + escapeHtml(idea.source) + ' ' + urlHtml + '</div>' +
+        feedbackHtml +
+      '</div>';
+    }).join('');
+  }
+  
+  document.getElementById('savedModal').classList.add('active');
+}
+
+function closeSavedModal() {
+  document.getElementById('savedModal').classList.remove('active');
+}
+
+// Close saved modal when clicking outside
+document.addEventListener('click', function(e) {
+  const modal = document.getElementById('savedModal');
+  if (e.target === modal) {
+    closeSavedModal();
+  }
+});
+
+async function downloadSavedIdeas() {
+  const res = await fetch('/api/liked');
+  const liked = await res.json();
+  
+  const blob = new Blob([JSON.stringify(liked, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'saved-ideas-' + new Date().toISOString().split('T')[0] + '.json';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 async function exportData() {
   window.location.href = '/api/export';
 }
@@ -358,6 +434,35 @@ async function undoSwipe() {
   }
   
   lastSwipe = null;
+}
+
+// Refresh feeds manually
+async function refreshFeeds() {
+  const btn = document.getElementById('refreshBtn');
+  if (btn) {
+    btn.classList.add('spinning');
+    btn.disabled = true;
+  }
+  
+  try {
+    const res = await fetch('/api/refresh', { method: 'POST' });
+    const data = await res.json();
+    
+    if (res.ok) {
+      // Reload ideas to show new content - stats will update automatically
+      await fetchIdeas();
+    } else if (res.status === 429) {
+      // Rate limited - worth telling them
+      alert(data.error);
+    }
+  } catch (e) {
+    console.error('Refresh error:', e);
+  } finally {
+    if (btn) {
+      btn.classList.remove('spinning');
+      btn.disabled = false;
+    }
+  }
 }
 
 // Initialize
@@ -490,6 +595,19 @@ async function regenerateMcpToken() {
     alert('Failed to regenerate token');
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
