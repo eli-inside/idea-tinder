@@ -287,6 +287,23 @@
         Export downloads all your swipe history as JSON.<br>
         Delete permanently removes your account and all data.
       </p>
+      
+      <div class="mcp-section" style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #333;">
+        <h4 style="color: #4ecdc4; margin-bottom: 10px;">🤖 AI Integration (MCP)</h4>
+        <p style="color: #888; font-size: 0.85em; margin-bottom: 15px;">
+          Use this token to let AI assistants like Claude access your saved ideas.<br>
+          Add the endpoint as an MCP server in your AI settings.
+        </p>
+        <div id="mcpTokenDisplay" style="display: none;">
+          <label style="font-size: 0.85em; color: #888;">Your MCP Endpoint:</label>
+          <div style="display: flex; gap: 8px; margin-top: 5px;">
+            <input type="text" id="mcpEndpoint" readonly style="flex: 1; padding: 10px; background: #1f1f35; border: 1px solid #3d3d55; border-radius: 8px; color: #4ecdc4; font-family: monospace; font-size: 0.85em;">
+            <button onclick="copyMcpEndpoint()" class="feed-btn" style="white-space: nowrap;">📋 Copy</button>
+          </div>
+          <button onclick="regenerateMcpToken()" class="feed-btn" style="margin-top: 10px; background: rgba(255,107,107,0.2); color: #ff6b6b;">🔄 Regenerate Token</button>
+        </div>
+        <button id="mcpShowBtn" onclick="showMcpToken()" class="feed-btn" style="background: #4ecdc4; color: #1a1a2e;">Show MCP Token</button>
+      </div>
     </div>
     <div class="site-footer">
       <p>&copy; 2026 Sells Brothers Incorporated. All rights reserved.</p>
@@ -296,6 +313,7 @@
   <script src="/app.js"></script>
 </body>
 </html>
+
 
 
 

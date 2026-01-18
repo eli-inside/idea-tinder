@@ -99,6 +99,14 @@ try {
   // Column already exists
 }
 
+// Migration: Add mcp_token column to users table
+try {
+  db.exec("ALTER TABLE users ADD COLUMN mcp_token TEXT");
+  console.log("Added mcp_token column to users table");
+} catch {
+  // Column already exists
+}
+
 // Migrate old swipe data from ideas table to swipes table (one-time migration)
 // Check if there's old-style data and migrate it
 try {
@@ -143,6 +151,7 @@ interface User {
   created_at: string;
   last_login: string | null;
   preferences: string;
+  mcp_token: string | null;
 }
 
 interface Idea {
@@ -888,6 +897,47 @@ const server = Bun.serve({
         return jsonResponse({ success: true }, 200, headers);
       }
       
+      // API: Get MCP token for AI integration
+      if (url.pathname === "/api/mcp-token" && req.method === "GET") {
+        if (!user) return jsonResponse({ error: "Not authenticated" }, 401);
+        
+        // Generate token if not exists
+        if (!user.mcp_token) {
+          const token = crypto.randomUUID();
+          db.query("UPDATE users SET mcp_token = ? WHERE id = ?").run(token, user.id);
+          user.mcp_token = token;
+        }
+        
+        return jsonResponse({ 
+          token: user.mcp_token,
+          endpoints: {
+            manifest: `${BASE_URL}/mcp/${user.mcp_token}/manifest`,
+            ideas: `${BASE_URL}/mcp/${user.mcp_token}/ideas`,
+            search: `${BASE_URL}/mcp/${user.mcp_token}/search?q={query}`,
+            preferences: `${BASE_URL}/mcp/${user.mcp_token}/preferences`,
+          }
+        }, 200, headers);
+      }
+      
+      // API: Regenerate MCP token
+      if (url.pathname === "/api/mcp-token" && req.method === "POST") {
+        if (!user) return jsonResponse({ error: "Not authenticated" }, 401);
+        
+        const newToken = crypto.randomUUID();
+        db.query("UPDATE users SET mcp_token = ? WHERE id = ?").run(newToken, user.id);
+        
+        return jsonResponse({ 
+          token: newToken,
+          message: "Token regenerated. Old token is now invalid.",
+          endpoints: {
+            manifest: `${BASE_URL}/mcp/${newToken}/manifest`,
+            ideas: `${BASE_URL}/mcp/${newToken}/ideas`,
+            search: `${BASE_URL}/mcp/${newToken}/search?q={query}`,
+            preferences: `${BASE_URL}/mcp/${newToken}/preferences`,
+          }
+        }, 200, headers);
+      }
+      
       // API: Get liked ideas
       if (url.pathname === "/api/liked" && req.method === "GET") {
         if (!user) return jsonResponse({ error: "Not authenticated" }, 401);
@@ -974,6 +1024,163 @@ const server = Bun.serve({
     const staticResponse = serveStatic(url.pathname);
     if (staticResponse) return staticResponse;
     
+    // ===========================================
+    // MCP ENDPOINTS (AI agent integration)
+    // Token-authenticated, no session required
+    // ===========================================
+    if (url.pathname.startsWith("/mcp/")) {
+      const mcpHeaders = {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+      };
+      
+      // Parse token from URL
+      const pathParts = url.pathname.split("/").filter(Boolean);
+      // /mcp/{token}/... => ["mcp", token, ...]
+      if (pathParts.length < 2) {
+        return jsonResponse({ error: "Missing token" }, 400, mcpHeaders);
+      }
+      
+      const token = pathParts[1];
+      const endpoint = pathParts.slice(2).join("/");
+      
+      // Look up user by token
+      const mcpUser = db.query("SELECT * FROM users WHERE mcp_token = ?").get(token) as User | null;
+      if (!mcpUser) {
+        return jsonResponse({ error: "Invalid token" }, 401, mcpHeaders);
+      }
+      
+      // GET /mcp/{token}/manifest - MCP tool manifest
+      if (endpoint === "manifest" && req.method === "GET") {
+        return jsonResponse({
+          name: "idea-tinder",
+          version: "1.0.0",
+          description: "Access your saved tech news ideas and hot takes",
+          tools: [
+            {
+              name: "list_saved_ideas",
+              description: "Get your saved ideas with hot takes",
+              parameters: {
+                limit: { type: "integer", default: 10, description: "Max ideas to return" },
+                category: { type: "string", optional: true, description: "Filter by category" }
+              }
+            },
+            {
+              name: "search_ideas",
+              description: "Search through your saved ideas",
+              parameters: {
+                query: { type: "string", description: "Search query" }
+              }
+            },
+            {
+              name: "get_preferences",
+              description: "Get your swipe statistics and category preferences"
+            },
+            {
+              name: "add_idea",
+              description: "Add a new idea to your queue",
+              parameters: {
+                title: { type: "string", description: "Idea title" },
+                source: { type: "string", description: "Source name" },
+                summary: { type: "string", description: "Brief summary" },
+                url: { type: "string", optional: true, description: "Link to source" }
+              }
+            }
+          ]
+        }, 200, mcpHeaders);
+      }
+      
+      // GET /mcp/{token}/ideas - List saved ideas
+      if (endpoint === "ideas" && req.method === "GET") {
+        const limit = parseInt(url.searchParams.get("limit") || "10");
+        const category = url.searchParams.get("category");
+        
+        let query = `
+          SELECT i.*, s.feedback as hot_take, s.swiped_at
+          FROM ideas i
+          JOIN swipes s ON i.id = s.idea_id
+          WHERE s.user_id = ? AND s.direction = 'right'
+        `;
+        const params: any[] = [mcpUser.id];
+        
+        if (category) {
+          query += " AND i.category = ?";
+          params.push(category);
+        }
+        
+        query += " ORDER BY s.swiped_at DESC LIMIT ?";
+        params.push(limit);
+        
+        const ideas = db.query(query).all(...params);
+        return jsonResponse({ ideas, count: ideas.length }, 200, mcpHeaders);
+      }
+      
+      // GET /mcp/{token}/search?q=query - Search saved ideas
+      if (endpoint === "search" && req.method === "GET") {
+        const searchQuery = url.searchParams.get("q") || "";
+        if (!searchQuery) {
+          return jsonResponse({ error: "Query parameter 'q' is required" }, 400, mcpHeaders);
+        }
+        
+        const searchPattern = `%${searchQuery}%`;
+        const ideas = db.query(`
+          SELECT i.*, s.feedback as hot_take, s.swiped_at
+          FROM ideas i
+          JOIN swipes s ON i.id = s.idea_id
+          WHERE s.user_id = ? AND s.direction = 'right'
+          AND (i.title LIKE ? OR i.summary LIKE ? OR s.feedback LIKE ?)
+          ORDER BY s.swiped_at DESC
+          LIMIT 20
+        `).all(mcpUser.id, searchPattern, searchPattern, searchPattern);
+        
+        return jsonResponse({ ideas, count: ideas.length, query: searchQuery }, 200, mcpHeaders);
+      }
+      
+      // GET /mcp/{token}/preferences - Get user stats and preferences
+      if (endpoint === "preferences" && req.method === "GET") {
+        const stats = db.query(`
+          SELECT 
+            COUNT(*) as total_swipes,
+            SUM(CASE WHEN direction = 'right' THEN 1 ELSE 0 END) as saved,
+            SUM(CASE WHEN direction = 'left' THEN 1 ELSE 0 END) as dismissed
+          FROM swipes WHERE user_id = ?
+        `).get(mcpUser.id) as { total_swipes: number; saved: number; dismissed: number };
+        
+        const categoryPrefs = db.query(`
+          SELECT i.category, COUNT(*) as count
+          FROM swipes s
+          JOIN ideas i ON s.idea_id = i.id
+          WHERE s.user_id = ? AND s.direction = 'right'
+          GROUP BY i.category
+          ORDER BY count DESC
+        `).all(mcpUser.id);
+        
+        return jsonResponse({
+          stats,
+          categories: categoryPrefs,
+          user: { email: mcpUser.email, name: mcpUser.name }
+        }, 200, mcpHeaders);
+      }
+      
+      // POST /mcp/{token}/ideas - Add idea to user's queue
+      if (endpoint === "ideas" && req.method === "POST") {
+        const body = await req.json() as { title: string; source: string; summary: string; url?: string; category?: string };
+        
+        if (!body.title || !body.source || !body.summary) {
+          return jsonResponse({ error: "title, source, and summary are required" }, 400, mcpHeaders);
+        }
+        
+        db.query(`
+          INSERT INTO ideas (title, source, summary, url, category, source_feed, content_type)
+          VALUES (?, ?, ?, ?, ?, 'mcp', 'article')
+        `).run(body.title, body.source, body.summary, body.url || null, body.category || "custom");
+        
+        return jsonResponse({ success: true, message: "Idea added to queue" }, 200, mcpHeaders);
+      }
+      
+      return jsonResponse({ error: "Unknown MCP endpoint" }, 404, mcpHeaders);
+    }
+    
     // Default to index.html for SPA
     if (!url.pathname.startsWith("/api/") && !url.pathname.startsWith("/auth/")) {
       const indexResponse = serveStatic("/");
@@ -993,6 +1200,10 @@ console.log(`Legal pages:`);
 console.log(`  - /privacy`);
 console.log(`  - /terms`);
 console.log(`  - /about`);
+
+
+
+
 
 
 

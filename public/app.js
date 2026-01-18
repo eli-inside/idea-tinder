@@ -452,6 +452,46 @@ async function deleteFeed(feedId) {
   }
 }
 
+// MCP Token management
+async function showMcpToken() {
+  try {
+    const res = await fetch('/api/mcp-token');
+    const data = await res.json();
+    
+    document.getElementById('mcpEndpoint').value = data.endpoints.manifest;
+    document.getElementById('mcpTokenDisplay').style.display = 'block';
+    document.getElementById('mcpShowBtn').style.display = 'none';
+  } catch (e) {
+    alert('Failed to load MCP token');
+  }
+}
+
+function copyMcpEndpoint() {
+  const input = document.getElementById('mcpEndpoint');
+  input.select();
+  document.execCommand('copy');
+  
+  const btn = event.target;
+  const original = btn.textContent;
+  btn.textContent = '✓ Copied!';
+  setTimeout(() => btn.textContent = original, 2000);
+}
+
+async function regenerateMcpToken() {
+  if (!confirm('Regenerate token? Your old token will stop working immediately.')) return;
+  
+  try {
+    const res = await fetch('/api/mcp-token', { method: 'POST' });
+    const data = await res.json();
+    
+    document.getElementById('mcpEndpoint').value = data.endpoints.manifest;
+    alert('Token regenerated! Update your AI settings with the new endpoint.');
+  } catch (e) {
+    alert('Failed to regenerate token');
+  }
+}
+
+
 
 
 
