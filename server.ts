@@ -910,7 +910,7 @@ const server = Bun.serve({
         
         return jsonResponse({ 
           token: user.mcp_token,
-          endpoint: `${BASE_URL}/mcp/${user.mcp_token}/sse`,
+          endpoint: `${BASE_URL}/mcp/${user.mcp_token}`,
           note: "Add this URL as a custom MCP server in Claude Desktop or claude.ai"
         }, 200, headers);
       }
@@ -925,7 +925,7 @@ const server = Bun.serve({
         return jsonResponse({ 
           token: newToken,
           message: "Token regenerated. Old token is now invalid.",
-          endpoint: `${BASE_URL}/mcp/${newToken}/sse`,
+          endpoint: `${BASE_URL}/mcp/${newToken}`,
           note: "Add this URL as a custom MCP server in Claude Desktop or claude.ai"
         }, 200, headers);
       }
@@ -1018,13 +1018,14 @@ const server = Bun.serve({
     
     // ===========================================
     // MCP ENDPOINTS (AI agent integration)
-    // Token-authenticated, SSE-based MCP protocol
+    // Streamable HTTP transport (spec 2025-03-26)
+    // Single endpoint: POST /mcp/{token}
     // ===========================================
     if (url.pathname.startsWith("/mcp/")) {
       const corsHeaders = {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Accept, Mcp-Session-Id",
       };
       
       // Handle CORS preflight
@@ -1032,14 +1033,13 @@ const server = Bun.serve({
         return new Response(null, { status: 204, headers: corsHeaders });
       }
       
-      // Parse token from URL: /mcp/{token}/sse or /mcp/{token}/messages
+      // Parse token from URL: /mcp/{token}
       const pathParts = url.pathname.split("/").filter(Boolean);
-      if (pathParts.length < 3) {
-        return jsonResponse({ error: "Invalid MCP path" }, 400, corsHeaders);
+      if (pathParts.length < 2) {
+        return jsonResponse({ error: "Invalid MCP path. Use /mcp/{token}" }, 400, corsHeaders);
       }
       
       const token = pathParts[1];
-      const endpoint = pathParts[2];
       
       // Look up user by token
       const mcpUser = db.query("SELECT * FROM users WHERE mcp_token = ?").get(token) as User | null;
@@ -1184,50 +1184,12 @@ const server = Bun.serve({
         }
       }
       
-      // GET /mcp/{token}/sse - SSE endpoint for MCP connection
-      if (endpoint === "sse" && req.method === "GET") {
-        const messagesUrl = `${BASE_URL}/mcp/${token}/messages`;
-        
-        // Create SSE stream
-        const stream = new ReadableStream({
-          start(controller) {
-            // Send endpoint event
-            const endpointEvent = `event: endpoint\ndata: ${messagesUrl}\n\n`;
-            controller.enqueue(new TextEncoder().encode(endpointEvent));
-            
-            // Keep connection alive with periodic pings
-            const pingInterval = setInterval(() => {
-              try {
-                controller.enqueue(new TextEncoder().encode(`: ping\n\n`));
-              } catch {
-                clearInterval(pingInterval);
-              }
-            }, 30000);
-            
-            // Clean up on close (this won't fire in Bun properly, but good practice)
-            req.signal?.addEventListener("abort", () => {
-              clearInterval(pingInterval);
-              controller.close();
-            });
-          }
-        });
-        
-        return new Response(stream, {
-          headers: {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            ...corsHeaders,
-          }
-        });
-      }
-      
-      // POST /mcp/{token}/messages - JSON-RPC message handler
-      if (endpoint === "messages" && req.method === "POST") {
-        const body = await req.json() as { jsonrpc: string; id: number | string; method: string; params?: any };
+      // POST /mcp/{token} - Streamable HTTP: JSON-RPC message handler
+      if (req.method === "POST") {
+        const body = await req.json() as { jsonrpc: string; id?: number | string; method: string; params?: any };
         
         if (body.jsonrpc !== "2.0") {
-          return jsonResponse({ jsonrpc: "2.0", id: body.id, error: { code: -32600, message: "Invalid Request" } }, 200, corsHeaders);
+          return jsonResponse({ jsonrpc: "2.0", id: body.id, error: { code: -32600, message: "Invalid Request" } }, 400, corsHeaders);
         }
         
         let result: any;
@@ -1235,7 +1197,7 @@ const server = Bun.serve({
         switch (body.method) {
           case "initialize":
             result = {
-              protocolVersion: "2024-11-05",
+              protocolVersion: "2025-03-26",
               serverInfo: { name: "idea-tinder", version: "1.0.0" },
               capabilities: { tools: {} }
             };
@@ -1256,8 +1218,12 @@ const server = Bun.serve({
             
           case "notifications/initialized":
           case "notifications/cancelled":
-            // Acknowledge notifications
-            return new Response(null, { status: 204, headers: corsHeaders });
+            // Acknowledge notifications with 202 Accepted (no response body needed)
+            return new Response(null, { status: 202, headers: corsHeaders });
+            
+          case "ping":
+            result = {};
+            break;
             
           default:
             return jsonResponse({
@@ -1267,10 +1233,26 @@ const server = Bun.serve({
             }, 200, corsHeaders);
         }
         
-        return jsonResponse({ jsonrpc: "2.0", id: body.id, result }, 200, corsHeaders);
+        return jsonResponse({ jsonrpc: "2.0", id: body.id, result }, 200, {
+          ...corsHeaders,
+          "Content-Type": "application/json",
+        });
       }
       
-      return jsonResponse({ error: "Unknown MCP endpoint. Use /mcp/{token}/sse to connect." }, 404, corsHeaders);
+      // GET /mcp/{token} - Optional: SSE stream for server-initiated messages
+      if (req.method === "GET") {
+        // For now, just return 405 - we don't have server-initiated messages
+        // In future, this could return an SSE stream for notifications
+        return new Response(JSON.stringify({ 
+          error: "GET not supported. Use POST for MCP requests.",
+          hint: "This server uses Streamable HTTP transport. Send JSON-RPC requests via POST."
+        }), { 
+          status: 405, 
+          headers: { ...corsHeaders, "Content-Type": "application/json" } 
+        });
+      }
+      
+      return jsonResponse({ error: "Method not allowed" }, 405, corsHeaders);
     }
     
     // Default to index.html for SPA
@@ -1292,6 +1274,9 @@ console.log(`Legal pages:`);
 console.log(`  - /privacy`);
 console.log(`  - /terms`);
 console.log(`  - /about`);
+
+
+
 
 
 
