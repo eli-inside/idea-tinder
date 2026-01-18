@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#ff6b6b">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -102,7 +102,7 @@
     }
     .swipe-indicator.left { left: 20px; background: #ff6b6b; transform: rotate(-20deg); }
     .swipe-indicator.right { right: 20px; background: #4ecdc4; transform: rotate(20deg); }
-    .actions { display: flex; justify-content: center; gap: 30px; padding: 20px 0; }
+    .actions { display: flex; justify-content: center; gap: 30px; padding: 20px 0; padding-bottom: calc(20px + env(safe-area-inset-bottom, 0px)); }
     .action-btn {
       width: 70px;
       height: 70px;
@@ -152,7 +152,7 @@
     .modal-btn:hover { opacity: 0.9; }
     .modal-btn.skip { background: #3d3d55; color: #888; }
     .modal-btn.submit { background: linear-gradient(145deg, #4ecdc4, #3dbdb5); color: #fff; }
-    .admin-toggle { position: fixed; bottom: 20px; right: 20px; background: #3d3d55; border: none; color: #888; padding: 10px 15px; border-radius: 10px; cursor: pointer; font-size: 0.85em; }
+    .admin-toggle { position: fixed; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); right: 20px; background: #3d3d55; border: none; color: #888; padding: 10px 15px; border-radius: 10px; cursor: pointer; font-size: 0.85em; }
     .admin-panel { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: #1a1a2e; z-index: 200; overflow-y: auto; padding: 20px; }
     .admin-panel.active { display: block; }
     .admin-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
@@ -313,6 +313,9 @@
   <script src="/app.js"></script>
 </body>
 </html>
+
+
+
 
 
 
