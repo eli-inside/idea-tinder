@@ -115,13 +115,13 @@ New users get 12 default feeds seeded to their account. Users can add/remove/dis
 
 ### Adding Feeds
 
-Users can add custom RSS feeds through the UI or via MCP tools:
+Users can add custom RSS feeds through the UI. AI agents can manage feeds via the MCP server (see Settings for your unique MCP URL).
 
-```bash
-# Via MCP
-get_feeds()  # List current feeds
-set_feeds([...])  # Replace feed list
-```
+**MCP Tools:**
+- `get_feeds` — List current RSS feeds
+- `set_feeds` — Replace the feed list
+- `get_saved_ideas` — Get saved ideas with hot takes
+- `set_saved_ideas` — Replace saved ideas list
 
 The cron job runs every morning at 9am Eastern, although you can manually refresh during the day or when you customize your RSS feeds.
 
@@ -160,6 +160,7 @@ A project of **Sells Brothers Incorporated**.
 MIT — use it, fork it, improve it.
 
 Enjoy! 🎉
+
 
 
 
