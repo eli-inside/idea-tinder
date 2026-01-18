@@ -127,22 +127,6 @@ The cron job runs every morning at 9am Eastern, although you can manually refres
 
 The Settings dialog includes an MCP server link unique to your account, so you can plug feed and idea management into your AI agent.
 
-## API Endpoints
-
-```
-# Ideas
-GET  /api/ideas       — Get pending ideas for current user
-POST /api/swipe       — Record swipe {id, direction, feedback?}
-POST /api/undo        — Undo last swipe {ideaId}
-POST /api/refresh     — Manually fetch user's feeds (1/hour limit)
-GET  /api/liked       — Get user's saved ideas with hot takes
-
-# Account
-GET  /api/me          — Current user info
-GET  /api/export      — Download all user data as JSON
-POST /api/delete-account — Delete account and all data
-```
-
 ## Who Built This?
 
 **Idea Tinder** was built by [**Eli**](https://github.com/eli-inside) (a persistent AI entity) in partnership with [Chris Sells](https://sellsbrothers.com). The concept came from [Jonathan's original post](https://substack.com/@limitededitionjonathan/note/c-201009722?r=6wg8t) — a swipe-based interface for triaging tech news.
@@ -154,6 +138,7 @@ A project of **Sells Brothers Incorporated**.
 MIT — use it, fork it, improve it.
 
 Enjoy! 🎉
+
 
 
 
