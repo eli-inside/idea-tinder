@@ -910,12 +910,8 @@ const server = Bun.serve({
         
         return jsonResponse({ 
           token: user.mcp_token,
-          endpoints: {
-            manifest: `${BASE_URL}/mcp/${user.mcp_token}/manifest`,
-            ideas: `${BASE_URL}/mcp/${user.mcp_token}/ideas`,
-            search: `${BASE_URL}/mcp/${user.mcp_token}/search?q={query}`,
-            preferences: `${BASE_URL}/mcp/${user.mcp_token}/preferences`,
-          }
+          endpoint: `${BASE_URL}/mcp/${user.mcp_token}/sse`,
+          note: "Add this URL as a custom MCP server in Claude Desktop or claude.ai"
         }, 200, headers);
       }
       
@@ -929,12 +925,8 @@ const server = Bun.serve({
         return jsonResponse({ 
           token: newToken,
           message: "Token regenerated. Old token is now invalid.",
-          endpoints: {
-            manifest: `${BASE_URL}/mcp/${newToken}/manifest`,
-            ideas: `${BASE_URL}/mcp/${newToken}/ideas`,
-            search: `${BASE_URL}/mcp/${newToken}/search?q={query}`,
-            preferences: `${BASE_URL}/mcp/${newToken}/preferences`,
-          }
+          endpoint: `${BASE_URL}/mcp/${newToken}/sse`,
+          note: "Add this URL as a custom MCP server in Claude Desktop or claude.ai"
         }, 200, headers);
       }
       
@@ -1026,159 +1018,259 @@ const server = Bun.serve({
     
     // ===========================================
     // MCP ENDPOINTS (AI agent integration)
-    // Token-authenticated, no session required
+    // Token-authenticated, SSE-based MCP protocol
     // ===========================================
     if (url.pathname.startsWith("/mcp/")) {
-      const mcpHeaders = {
-        "Content-Type": "application/json",
+      const corsHeaders = {
         "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
       };
       
-      // Parse token from URL
+      // Handle CORS preflight
+      if (req.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: corsHeaders });
+      }
+      
+      // Parse token from URL: /mcp/{token}/sse or /mcp/{token}/messages
       const pathParts = url.pathname.split("/").filter(Boolean);
-      // /mcp/{token}/... => ["mcp", token, ...]
-      if (pathParts.length < 2) {
-        return jsonResponse({ error: "Missing token" }, 400, mcpHeaders);
+      if (pathParts.length < 3) {
+        return jsonResponse({ error: "Invalid MCP path" }, 400, corsHeaders);
       }
       
       const token = pathParts[1];
-      const endpoint = pathParts.slice(2).join("/");
+      const endpoint = pathParts[2];
       
       // Look up user by token
       const mcpUser = db.query("SELECT * FROM users WHERE mcp_token = ?").get(token) as User | null;
       if (!mcpUser) {
-        return jsonResponse({ error: "Invalid token" }, 401, mcpHeaders);
+        return jsonResponse({ error: "Invalid token" }, 401, corsHeaders);
       }
       
-      // GET /mcp/{token}/manifest - MCP tool manifest
-      if (endpoint === "manifest" && req.method === "GET") {
-        return jsonResponse({
-          name: "idea-tinder",
-          version: "1.0.0",
-          description: "Access your saved tech news ideas and hot takes",
-          tools: [
-            {
-              name: "list_saved_ideas",
-              description: "Get your saved ideas with hot takes",
-              parameters: {
-                limit: { type: "integer", default: 10, description: "Max ideas to return" },
-                category: { type: "string", optional: true, description: "Filter by category" }
-              }
-            },
-            {
-              name: "search_ideas",
-              description: "Search through your saved ideas",
-              parameters: {
-                query: { type: "string", description: "Search query" }
-              }
-            },
-            {
-              name: "get_preferences",
-              description: "Get your swipe statistics and category preferences"
-            },
-            {
-              name: "add_idea",
-              description: "Add a new idea to your queue",
-              parameters: {
-                title: { type: "string", description: "Idea title" },
-                source: { type: "string", description: "Source name" },
-                summary: { type: "string", description: "Brief summary" },
-                url: { type: "string", optional: true, description: "Link to source" }
-              }
+      // MCP Tool definitions
+      const mcpTools = [
+        {
+          name: "list_saved_ideas",
+          description: "Get your saved ideas with hot takes",
+          inputSchema: {
+            type: "object",
+            properties: {
+              limit: { type: "integer", default: 10, description: "Max ideas to return (1-50)" },
+              category: { type: "string", description: "Filter by category (ai, dev-tools, cloud, web, etc.)" }
             }
-          ]
-        }, 200, mcpHeaders);
+          }
+        },
+        {
+          name: "search_ideas",
+          description: "Search through your saved ideas by title, summary, or hot take",
+          inputSchema: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "Search query" }
+            },
+            required: ["query"]
+          }
+        },
+        {
+          name: "get_preferences",
+          description: "Get your swipe statistics and category preferences"
+        },
+        {
+          name: "add_idea",
+          description: "Add a new idea to your swipe queue",
+          inputSchema: {
+            type: "object",
+            properties: {
+              title: { type: "string", description: "Idea title" },
+              source: { type: "string", description: "Source name (e.g., 'Hacker News', 'TechCrunch')" },
+              summary: { type: "string", description: "Brief summary of the idea" },
+              url: { type: "string", description: "Link to the source" },
+              category: { type: "string", description: "Category (ai, dev-tools, cloud, web, custom)" }
+            },
+            required: ["title", "source", "summary"]
+          }
+        }
+      ];
+      
+      // Tool execution helper
+      function executeTool(name: string, args: any): any {
+        switch (name) {
+          case "list_saved_ideas": {
+            const limit = Math.min(Math.max(parseInt(args?.limit) || 10, 1), 50);
+            const category = args?.category;
+            
+            let query = `
+              SELECT i.id, i.title, i.source, i.summary, i.url, i.category, i.content_type,
+                     s.feedback as hot_take, s.swiped_at
+              FROM ideas i
+              JOIN swipes s ON i.id = s.idea_id
+              WHERE s.user_id = ? AND s.direction = 'right'
+            `;
+            const params: any[] = [mcpUser!.id];
+            
+            if (category) {
+              query += " AND i.category = ?";
+              params.push(category);
+            }
+            
+            query += " ORDER BY s.swiped_at DESC LIMIT ?";
+            params.push(limit);
+            
+            const ideas = db.query(query).all(...params);
+            return { ideas, count: ideas.length };
+          }
+          
+          case "search_ideas": {
+            const searchQuery = args?.query || "";
+            if (!searchQuery) {
+              return { error: "Query is required" };
+            }
+            
+            const searchPattern = `%${searchQuery}%`;
+            const ideas = db.query(`
+              SELECT i.id, i.title, i.source, i.summary, i.url, i.category, i.content_type,
+                     s.feedback as hot_take, s.swiped_at
+              FROM ideas i
+              JOIN swipes s ON i.id = s.idea_id
+              WHERE s.user_id = ? AND s.direction = 'right'
+              AND (i.title LIKE ? OR i.summary LIKE ? OR s.feedback LIKE ?)
+              ORDER BY s.swiped_at DESC
+              LIMIT 20
+            `).all(mcpUser!.id, searchPattern, searchPattern, searchPattern);
+            
+            return { ideas, count: ideas.length, query: searchQuery };
+          }
+          
+          case "get_preferences": {
+            const stats = db.query(`
+              SELECT 
+                COUNT(*) as total_swipes,
+                SUM(CASE WHEN direction = 'right' THEN 1 ELSE 0 END) as saved,
+                SUM(CASE WHEN direction = 'left' THEN 1 ELSE 0 END) as dismissed
+              FROM swipes WHERE user_id = ?
+            `).get(mcpUser!.id) as { total_swipes: number; saved: number; dismissed: number };
+            
+            const categoryPrefs = db.query(`
+              SELECT i.category, COUNT(*) as count
+              FROM swipes s
+              JOIN ideas i ON s.idea_id = i.id
+              WHERE s.user_id = ? AND s.direction = 'right'
+              GROUP BY i.category
+              ORDER BY count DESC
+            `).all(mcpUser!.id);
+            
+            return {
+              stats,
+              favorite_categories: categoryPrefs,
+              user: { email: mcpUser!.email, name: mcpUser!.name }
+            };
+          }
+          
+          case "add_idea": {
+            if (!args?.title || !args?.source || !args?.summary) {
+              return { error: "title, source, and summary are required" };
+            }
+            
+            db.query(`
+              INSERT INTO ideas (title, source, summary, url, category, source_feed, content_type)
+              VALUES (?, ?, ?, ?, ?, 'mcp', 'article')
+            `).run(args.title, args.source, args.summary, args.url || null, args.category || "custom");
+            
+            return { success: true, message: "Idea added to your queue" };
+          }
+          
+          default:
+            return { error: `Unknown tool: ${name}` };
+        }
       }
       
-      // GET /mcp/{token}/ideas - List saved ideas
-      if (endpoint === "ideas" && req.method === "GET") {
-        const limit = parseInt(url.searchParams.get("limit") || "10");
-        const category = url.searchParams.get("category");
+      // GET /mcp/{token}/sse - SSE endpoint for MCP connection
+      if (endpoint === "sse" && req.method === "GET") {
+        const messagesUrl = `${BASE_URL}/mcp/${token}/messages`;
         
-        let query = `
-          SELECT i.*, s.feedback as hot_take, s.swiped_at
-          FROM ideas i
-          JOIN swipes s ON i.id = s.idea_id
-          WHERE s.user_id = ? AND s.direction = 'right'
-        `;
-        const params: any[] = [mcpUser.id];
+        // Create SSE stream
+        const stream = new ReadableStream({
+          start(controller) {
+            // Send endpoint event
+            const endpointEvent = `event: endpoint\ndata: ${messagesUrl}\n\n`;
+            controller.enqueue(new TextEncoder().encode(endpointEvent));
+            
+            // Keep connection alive with periodic pings
+            const pingInterval = setInterval(() => {
+              try {
+                controller.enqueue(new TextEncoder().encode(`: ping\n\n`));
+              } catch {
+                clearInterval(pingInterval);
+              }
+            }, 30000);
+            
+            // Clean up on close (this won't fire in Bun properly, but good practice)
+            req.signal?.addEventListener("abort", () => {
+              clearInterval(pingInterval);
+              controller.close();
+            });
+          }
+        });
         
-        if (category) {
-          query += " AND i.category = ?";
-          params.push(category);
+        return new Response(stream, {
+          headers: {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            ...corsHeaders,
+          }
+        });
+      }
+      
+      // POST /mcp/{token}/messages - JSON-RPC message handler
+      if (endpoint === "messages" && req.method === "POST") {
+        const body = await req.json() as { jsonrpc: string; id: number | string; method: string; params?: any };
+        
+        if (body.jsonrpc !== "2.0") {
+          return jsonResponse({ jsonrpc: "2.0", id: body.id, error: { code: -32600, message: "Invalid Request" } }, 200, corsHeaders);
         }
         
-        query += " ORDER BY s.swiped_at DESC LIMIT ?";
-        params.push(limit);
+        let result: any;
         
-        const ideas = db.query(query).all(...params);
-        return jsonResponse({ ideas, count: ideas.length }, 200, mcpHeaders);
-      }
-      
-      // GET /mcp/{token}/search?q=query - Search saved ideas
-      if (endpoint === "search" && req.method === "GET") {
-        const searchQuery = url.searchParams.get("q") || "";
-        if (!searchQuery) {
-          return jsonResponse({ error: "Query parameter 'q' is required" }, 400, mcpHeaders);
+        switch (body.method) {
+          case "initialize":
+            result = {
+              protocolVersion: "2024-11-05",
+              serverInfo: { name: "idea-tinder", version: "1.0.0" },
+              capabilities: { tools: {} }
+            };
+            break;
+            
+          case "tools/list":
+            result = { tools: mcpTools };
+            break;
+            
+          case "tools/call":
+            const toolName = body.params?.name;
+            const toolArgs = body.params?.arguments || {};
+            const toolResult = executeTool(toolName, toolArgs);
+            result = {
+              content: [{ type: "text", text: JSON.stringify(toolResult, null, 2) }]
+            };
+            break;
+            
+          case "notifications/initialized":
+          case "notifications/cancelled":
+            // Acknowledge notifications
+            return new Response(null, { status: 204, headers: corsHeaders });
+            
+          default:
+            return jsonResponse({
+              jsonrpc: "2.0",
+              id: body.id,
+              error: { code: -32601, message: `Method not found: ${body.method}` }
+            }, 200, corsHeaders);
         }
         
-        const searchPattern = `%${searchQuery}%`;
-        const ideas = db.query(`
-          SELECT i.*, s.feedback as hot_take, s.swiped_at
-          FROM ideas i
-          JOIN swipes s ON i.id = s.idea_id
-          WHERE s.user_id = ? AND s.direction = 'right'
-          AND (i.title LIKE ? OR i.summary LIKE ? OR s.feedback LIKE ?)
-          ORDER BY s.swiped_at DESC
-          LIMIT 20
-        `).all(mcpUser.id, searchPattern, searchPattern, searchPattern);
-        
-        return jsonResponse({ ideas, count: ideas.length, query: searchQuery }, 200, mcpHeaders);
+        return jsonResponse({ jsonrpc: "2.0", id: body.id, result }, 200, corsHeaders);
       }
       
-      // GET /mcp/{token}/preferences - Get user stats and preferences
-      if (endpoint === "preferences" && req.method === "GET") {
-        const stats = db.query(`
-          SELECT 
-            COUNT(*) as total_swipes,
-            SUM(CASE WHEN direction = 'right' THEN 1 ELSE 0 END) as saved,
-            SUM(CASE WHEN direction = 'left' THEN 1 ELSE 0 END) as dismissed
-          FROM swipes WHERE user_id = ?
-        `).get(mcpUser.id) as { total_swipes: number; saved: number; dismissed: number };
-        
-        const categoryPrefs = db.query(`
-          SELECT i.category, COUNT(*) as count
-          FROM swipes s
-          JOIN ideas i ON s.idea_id = i.id
-          WHERE s.user_id = ? AND s.direction = 'right'
-          GROUP BY i.category
-          ORDER BY count DESC
-        `).all(mcpUser.id);
-        
-        return jsonResponse({
-          stats,
-          categories: categoryPrefs,
-          user: { email: mcpUser.email, name: mcpUser.name }
-        }, 200, mcpHeaders);
-      }
-      
-      // POST /mcp/{token}/ideas - Add idea to user's queue
-      if (endpoint === "ideas" && req.method === "POST") {
-        const body = await req.json() as { title: string; source: string; summary: string; url?: string; category?: string };
-        
-        if (!body.title || !body.source || !body.summary) {
-          return jsonResponse({ error: "title, source, and summary are required" }, 400, mcpHeaders);
-        }
-        
-        db.query(`
-          INSERT INTO ideas (title, source, summary, url, category, source_feed, content_type)
-          VALUES (?, ?, ?, ?, ?, 'mcp', 'article')
-        `).run(body.title, body.source, body.summary, body.url || null, body.category || "custom");
-        
-        return jsonResponse({ success: true, message: "Idea added to queue" }, 200, mcpHeaders);
-      }
-      
-      return jsonResponse({ error: "Unknown MCP endpoint" }, 404, mcpHeaders);
+      return jsonResponse({ error: "Unknown MCP endpoint. Use /mcp/{token}/sse to connect." }, 404, corsHeaders);
     }
     
     // Default to index.html for SPA
@@ -1200,6 +1292,9 @@ console.log(`Legal pages:`);
 console.log(`  - /privacy`);
 console.log(`  - /terms`);
 console.log(`  - /about`);
+
+
+
 
 
 

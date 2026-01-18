@@ -458,7 +458,7 @@ async function showMcpToken() {
     const res = await fetch('/api/mcp-token');
     const data = await res.json();
     
-    document.getElementById('mcpEndpoint').value = data.endpoints.manifest;
+    document.getElementById('mcpEndpoint').value = data.endpoint;
     document.getElementById('mcpTokenDisplay').style.display = 'block';
     document.getElementById('mcpShowBtn').style.display = 'none';
   } catch (e) {
@@ -484,12 +484,14 @@ async function regenerateMcpToken() {
     const res = await fetch('/api/mcp-token', { method: 'POST' });
     const data = await res.json();
     
-    document.getElementById('mcpEndpoint').value = data.endpoints.manifest;
+    document.getElementById('mcpEndpoint').value = data.endpoint;
     alert('Token regenerated! Update your AI settings with the new endpoint.');
   } catch (e) {
     alert('Failed to regenerate token');
   }
 }
+
+
 
 
 
