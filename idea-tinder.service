@@ -1,0 +1,16 @@
+[Unit]
+Description=Idea Tinder
+After=network.target
+
+[Service]
+Type=simple
+User=eli
+WorkingDirectory=/home/eli/idea-tinder
+ExecStart=/home/eli/.bun/bin/bun run server.ts
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
+

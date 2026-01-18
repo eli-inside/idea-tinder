@@ -1,0 +1,26 @@
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Database
+*.db
+*.db-journal
+
+# Logs
+*.log
+ingest.log
+
+# Dependencies (Bun)
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
