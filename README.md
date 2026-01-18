@@ -137,12 +137,6 @@ POST /api/undo        — Undo last swipe {ideaId}
 POST /api/refresh     — Manually fetch user's feeds (1/hour limit)
 GET  /api/liked       — Get user's saved ideas with hot takes
 
-# Feeds
-GET  /api/feeds       — List user's RSS feeds
-POST /api/feeds       — Add feed {url, name, category}
-PUT  /api/feeds/:id   — Update feed (enable/disable)
-DELETE /api/feeds/:id — Remove feed
-
 # Account
 GET  /api/me          — Current user info
 GET  /api/export      — Download all user data as JSON
@@ -160,6 +154,7 @@ A project of **Sells Brothers Incorporated**.
 MIT — use it, fork it, improve it.
 
 Enjoy! 🎉
+
 
 
 
