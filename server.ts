@@ -1050,44 +1050,60 @@ const server = Bun.serve({
       // MCP Tool definitions
       const mcpTools = [
         {
-          name: "list_saved_ideas",
-          description: "Get your saved ideas with hot takes",
+          name: "get_feeds",
+          description: "Get all configured RSS/news feeds as JSON",
+          inputSchema: { type: "object", properties: {} }
+        },
+        {
+          name: "set_feeds",
+          description: "Replace all RSS/news feeds with new JSON array. Each feed needs: url, name, category, enabled (boolean)",
           inputSchema: {
             type: "object",
             properties: {
-              limit: { type: "integer", default: 10, description: "Max ideas to return (1-50)" },
-              category: { type: "string", description: "Filter by category (ai, dev-tools, cloud, web, etc.)" }
-            }
+              feeds: { 
+                type: "array", 
+                description: "Array of feed objects with url, name, category, enabled",
+                items: {
+                  type: "object",
+                  properties: {
+                    url: { type: "string" },
+                    name: { type: "string" },
+                    category: { type: "string" },
+                    enabled: { type: "boolean" }
+                  },
+                  required: ["url", "name"]
+                }
+              }
+            },
+            required: ["feeds"]
           }
         },
         {
-          name: "search_ideas",
-          description: "Search through your saved ideas by title, summary, or hot take",
+          name: "get_saved_ideas",
+          description: "Get all ideas you swiped right on, with your hot takes",
+          inputSchema: { type: "object", properties: {} }
+        },
+        {
+          name: "set_saved_ideas",
+          description: "Update saved ideas - can modify hot takes or remove ideas. Each idea needs: id (to match existing), hot_take (optional update), remove (boolean, optional)",
           inputSchema: {
             type: "object",
             properties: {
-              query: { type: "string", description: "Search query" }
+              ideas: {
+                type: "array",
+                description: "Array of idea updates",
+                items: {
+                  type: "object",
+                  properties: {
+                    id: { type: "integer", description: "Idea ID to update" },
+                    hot_take: { type: "string", description: "New hot take text" },
+                    remove: { type: "boolean", description: "Set true to remove from saved" }
+                  },
+                  required: ["id"]
+                }
+              }
             },
-            required: ["query"]
-          }
-        },
-        {
-          name: "get_preferences",
-          description: "Get your swipe statistics and category preferences"
-        },
-        {
-          name: "add_idea",
-          description: "Add a new idea to your swipe queue",
-          inputSchema: {
-            type: "object",
-            properties: {
-              title: { type: "string", description: "Idea title" },
-              source: { type: "string", description: "Source name (e.g., 'Hacker News', 'TechCrunch')" },
-              summary: { type: "string", description: "Brief summary of the idea" },
-              url: { type: "string", description: "Link to the source" },
-              category: { type: "string", description: "Category (ai, dev-tools, cloud, web, custom)" }
-            },
-            required: ["title", "source", "summary"]
+            required: ["ideas"]
           }
         }
       ];
@@ -1095,88 +1111,84 @@ const server = Bun.serve({
       // Tool execution helper
       function executeTool(name: string, args: any): any {
         switch (name) {
-          case "list_saved_ideas": {
-            const limit = Math.min(Math.max(parseInt(args?.limit) || 10, 1), 50);
-            const category = args?.category;
-            
-            let query = `
-              SELECT i.id, i.title, i.source, i.summary, i.url, i.category, i.content_type,
-                     s.feedback as hot_take, s.swiped_at
-              FROM ideas i
-              JOIN swipes s ON i.id = s.idea_id
-              WHERE s.user_id = ? AND s.direction = 'right'
-            `;
-            const params: any[] = [mcpUser!.id];
-            
-            if (category) {
-              query += " AND i.category = ?";
-              params.push(category);
-            }
-            
-            query += " ORDER BY s.swiped_at DESC LIMIT ?";
-            params.push(limit);
-            
-            const ideas = db.query(query).all(...params);
-            return { ideas, count: ideas.length };
+          case "get_feeds": {
+            const feeds = db.query(`
+              SELECT id, url, name, category, enabled, created_at, last_fetched, last_error
+              FROM user_feeds
+              WHERE user_id = ?
+              ORDER BY name
+            `).all(mcpUser!.id);
+            return { feeds };
           }
           
-          case "search_ideas": {
-            const searchQuery = args?.query || "";
-            if (!searchQuery) {
-              return { error: "Query is required" };
+          case "set_feeds": {
+            if (!Array.isArray(args?.feeds)) {
+              return { error: "feeds must be an array" };
             }
             
-            const searchPattern = `%${searchQuery}%`;
+            // Delete all existing feeds for user
+            db.query("DELETE FROM user_feeds WHERE user_id = ?").run(mcpUser!.id);
+            
+            // Insert new feeds
+            const insertStmt = db.query(`
+              INSERT INTO user_feeds (user_id, url, name, category, enabled)
+              VALUES (?, ?, ?, ?, ?)
+            `);
+            
+            for (const feed of args.feeds) {
+              if (!feed.url || !feed.name) continue;
+              insertStmt.run(
+                mcpUser!.id,
+                feed.url,
+                feed.name,
+                feed.category || "general",
+                feed.enabled !== false ? 1 : 0
+              );
+            }
+            
+            return { success: true, count: args.feeds.length };
+          }
+          
+          case "get_saved_ideas": {
             const ideas = db.query(`
               SELECT i.id, i.title, i.source, i.summary, i.url, i.category, i.content_type,
                      s.feedback as hot_take, s.swiped_at
               FROM ideas i
               JOIN swipes s ON i.id = s.idea_id
               WHERE s.user_id = ? AND s.direction = 'right'
-              AND (i.title LIKE ? OR i.summary LIKE ? OR s.feedback LIKE ?)
               ORDER BY s.swiped_at DESC
-              LIMIT 20
-            `).all(mcpUser!.id, searchPattern, searchPattern, searchPattern);
-            
-            return { ideas, count: ideas.length, query: searchQuery };
-          }
-          
-          case "get_preferences": {
-            const stats = db.query(`
-              SELECT 
-                COUNT(*) as total_swipes,
-                SUM(CASE WHEN direction = 'right' THEN 1 ELSE 0 END) as saved,
-                SUM(CASE WHEN direction = 'left' THEN 1 ELSE 0 END) as dismissed
-              FROM swipes WHERE user_id = ?
-            `).get(mcpUser!.id) as { total_swipes: number; saved: number; dismissed: number };
-            
-            const categoryPrefs = db.query(`
-              SELECT i.category, COUNT(*) as count
-              FROM swipes s
-              JOIN ideas i ON s.idea_id = i.id
-              WHERE s.user_id = ? AND s.direction = 'right'
-              GROUP BY i.category
-              ORDER BY count DESC
             `).all(mcpUser!.id);
-            
-            return {
-              stats,
-              favorite_categories: categoryPrefs,
-              user: { email: mcpUser!.email, name: mcpUser!.name }
-            };
+            return { ideas, count: ideas.length };
           }
           
-          case "add_idea": {
-            if (!args?.title || !args?.source || !args?.summary) {
-              return { error: "title, source, and summary are required" };
+          case "set_saved_ideas": {
+            if (!Array.isArray(args?.ideas)) {
+              return { error: "ideas must be an array" };
             }
             
-            db.query(`
-              INSERT INTO ideas (title, source, summary, url, category, source_feed, content_type)
-              VALUES (?, ?, ?, ?, ?, 'mcp', 'article')
-            `).run(args.title, args.source, args.summary, args.url || null, args.category || "custom");
+            let updated = 0, removed = 0;
             
-            return { success: true, message: "Idea added to your queue" };
+            for (const idea of args.ideas) {
+              if (!idea.id) continue;
+              
+              if (idea.remove) {
+                // Remove from saved (delete the swipe)
+                db.query(`
+                  DELETE FROM swipes 
+                  WHERE user_id = ? AND idea_id = ? AND direction = 'right'
+                `).run(mcpUser!.id, idea.id);
+                removed++;
+              } else if (idea.hot_take !== undefined) {
+                // Update hot take
+                db.query(`
+                  UPDATE swipes SET feedback = ?
+                  WHERE user_id = ? AND idea_id = ? AND direction = 'right'
+                `).run(idea.hot_take, mcpUser!.id, idea.id);
+                updated++;
+              }
+            }
+            
+            return { success: true, updated, removed };
           }
           
           default:
@@ -1274,6 +1286,7 @@ console.log(`Legal pages:`);
 console.log(`  - /privacy`);
 console.log(`  - /terms`);
 console.log(`  - /about`);
+
 
 
 
