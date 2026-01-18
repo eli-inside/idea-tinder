@@ -73,6 +73,22 @@ db.exec(`
     completed_at DATETIME,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
   );
+
+  -- User-configurable RSS feeds
+  CREATE TABLE IF NOT EXISTS user_feeds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    url TEXT NOT NULL,
+    name TEXT NOT NULL,
+    category TEXT DEFAULT 'custom',
+    enabled BOOLEAN DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_fetched DATETIME,
+    last_error TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    UNIQUE(user_id, url)
+  );
+  CREATE INDEX IF NOT EXISTS idx_user_feeds_user ON user_feeds(user_id);
 `);
 
 // Migration: Add content_type column to ideas table
@@ -792,6 +808,86 @@ const server = Bun.serve({
         return jsonResponse({ success: true, wasRight: existing.direction === 'right' }, 200, headers);
       }
       
+      // API: List user's custom RSS feeds
+      if (url.pathname === "/api/feeds" && req.method === "GET") {
+        if (!user) return jsonResponse({ error: "Not authenticated" }, 401);
+        
+        const feeds = db.query(`
+          SELECT id, url, name, category, enabled, created_at, last_fetched, last_error
+          FROM user_feeds
+          WHERE user_id = ?
+          ORDER BY created_at DESC
+        `).all(user.id);
+        return jsonResponse(feeds, 200, headers);
+      }
+      
+      // API: Add custom RSS feed
+      if (url.pathname === "/api/feeds" && req.method === "POST") {
+        if (!user) return jsonResponse({ error: "Not authenticated" }, 401);
+        
+        const body = await req.json() as { url: string; name: string; category?: string };
+        if (!body.url || !body.name) {
+          return jsonResponse({ error: "URL and name are required" }, 400, headers);
+        }
+        
+        try {
+          db.query(`
+            INSERT INTO user_feeds (user_id, url, name, category)
+            VALUES (?, ?, ?, ?)
+          `).run(user.id, body.url, body.name, body.category || 'custom');
+          
+          const feed = db.query("SELECT * FROM user_feeds WHERE user_id = ? AND url = ?").get(user.id, body.url);
+          return jsonResponse({ success: true, feed }, 200, headers);
+        } catch (error: any) {
+          if (error.message?.includes("UNIQUE constraint")) {
+            return jsonResponse({ error: "Feed already exists" }, 409, headers);
+          }
+          throw error;
+        }
+      }
+      
+      // API: Update feed (toggle enabled, update name/category)
+      if (url.pathname.match(/^\/api\/feeds\/\d+$/) && req.method === "PUT") {
+        if (!user) return jsonResponse({ error: "Not authenticated" }, 401);
+        
+        const feedId = parseInt(url.pathname.split("/").pop()!);
+        const body = await req.json() as { name?: string; category?: string; enabled?: boolean };
+        
+        // Verify ownership
+        const feed = db.query("SELECT * FROM user_feeds WHERE id = ? AND user_id = ?").get(feedId, user.id);
+        if (!feed) {
+          return jsonResponse({ error: "Feed not found" }, 404, headers);
+        }
+        
+        const updates: string[] = [];
+        const values: any[] = [];
+        
+        if (body.name !== undefined) { updates.push("name = ?"); values.push(body.name); }
+        if (body.category !== undefined) { updates.push("category = ?"); values.push(body.category); }
+        if (body.enabled !== undefined) { updates.push("enabled = ?"); values.push(body.enabled ? 1 : 0); }
+        
+        if (updates.length > 0) {
+          values.push(feedId, user.id);
+          db.query(`UPDATE user_feeds SET ${updates.join(", ")} WHERE id = ? AND user_id = ?`).run(...values);
+        }
+        
+        const updated = db.query("SELECT * FROM user_feeds WHERE id = ?").get(feedId);
+        return jsonResponse({ success: true, feed: updated }, 200, headers);
+      }
+      
+      // API: Delete custom feed
+      if (url.pathname.match(/^\/api\/feeds\/\d+$/) && req.method === "DELETE") {
+        if (!user) return jsonResponse({ error: "Not authenticated" }, 401);
+        
+        const feedId = parseInt(url.pathname.split("/").pop()!);
+        
+        const result = db.query("DELETE FROM user_feeds WHERE id = ? AND user_id = ?").run(feedId, user.id);
+        if (result.changes === 0) {
+          return jsonResponse({ error: "Feed not found" }, 404, headers);
+        }
+        return jsonResponse({ success: true }, 200, headers);
+      }
+      
       // API: Get liked ideas
       if (url.pathname === "/api/liked" && req.method === "GET") {
         if (!user) return jsonResponse({ error: "Not authenticated" }, 401);
@@ -897,6 +993,8 @@ console.log(`Legal pages:`);
 console.log(`  - /privacy`);
 console.log(`  - /terms`);
 console.log(`  - /about`);
+
+
 
 
 

@@ -181,6 +181,21 @@
     .account-btn { display: inline-block; padding: 12px 20px; border: none; border-radius: 10px; font-size: 0.9em; cursor: pointer; margin-right: 10px; margin-bottom: 10px; }
     .account-btn.export { background: #3d3d55; color: #4ecdc4; }
     .account-btn.delete { background: rgba(255,107,107,0.2); color: #ff6b6b; }
+    .feeds-section { max-width: 600px; margin: 40px auto; padding-top: 30px; border-top: 1px solid #3d3d55; }
+    .feeds-section h3 { margin-bottom: 10px; color: #feca57; }
+    .feed-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #2d2d44; border-radius: 8px; margin-bottom: 8px; }
+    .feed-info { display: flex; align-items: center; gap: 10px; }
+    .feed-status { font-size: 1em; }
+    .feed-name { color: #fff; font-weight: 500; }
+    .feed-category { color: #888; font-size: 0.8em; background: #1f1f35; padding: 2px 8px; border-radius: 10px; }
+    .feed-actions { display: flex; gap: 8px; }
+    .feed-btn { padding: 6px 12px; border: none; border-radius: 6px; font-size: 0.8em; cursor: pointer; background: #3d3d55; color: #4ecdc4; }
+    .feed-btn.delete { background: rgba(255,107,107,0.2); color: #ff6b6b; }
+    .feed-item.feed-error { border-left: 3px solid #ff6b6b; }
+    .feed-item.feed-disabled { opacity: 0.6; }
+    .add-feed-form label { display: block; margin-top: 10px; font-size: 0.85em; color: #888; }
+    .add-feed-form input, .add-feed-form select { width: 100%; padding: 10px; margin-top: 5px; background: #1f1f35; border: 1px solid #3d3d55; border-radius: 8px; color: #fff; }
+    .add-feed-form button { margin-top: 15px; padding: 10px 20px; background: #4ecdc4; color: #1a1a2e; border: none; border-radius: 8px; cursor: pointer; font-weight: 600; }
     .site-footer { text-align: center; padding: 15px; font-size: 0.75em; color: #555; }
     .site-footer a { color: #666; text-decoration: none; }
     .site-footer a:hover { color: #888; }
@@ -243,6 +258,27 @@
       <h3>✅ Saved Ideas</h3>
       <div id="likedIdeas"></div>
     </div>
+    <div class="feeds-section">
+      <h3>📰 My RSS Feeds</h3>
+      <p style="color: #888; font-size: 0.85em; margin-bottom: 15px;">Add your own RSS feeds to get personalized content. Default feeds are shared by all users.</p>
+      <div id="userFeeds" style="margin-bottom: 20px;"></div>
+      <div class="add-feed-form" style="border-top: 1px solid #333; padding-top: 15px;">
+        <label>Feed URL</label>
+        <input type="text" id="newFeedUrl" placeholder="https://example.com/feed.xml">
+        <label>Name</label>
+        <input type="text" id="newFeedName" placeholder="e.g., My Favorite Blog">
+        <label>Category</label>
+        <select id="newFeedCategory">
+          <option value="custom">Custom</option>
+          <option value="ai">AI / ML</option>
+          <option value="dev-tools">Dev Tools</option>
+          <option value="cloud">Cloud / Infra</option>
+          <option value="web">Web</option>
+          <option value="other">Other</option>
+        </select>
+        <button onclick="addFeed()">Add Feed ➕</button>
+      </div>
+    </div>
     <div class="account-section">
       <h3>⚙️ Account</h3>
       <button class="account-btn export" onclick="exportData()">📥 Export My Data</button>
@@ -260,6 +296,8 @@
   <script src="/app.js"></script>
 </body>
 </html>
+
+
 
 
 

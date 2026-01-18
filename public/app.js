@@ -244,6 +244,7 @@ function toggleAdmin() {
   panel.classList.toggle('active');
   if (panel.classList.contains('active')) {
     loadLikedIdeas();
+    loadUserFeeds();
   }
 }
 
@@ -361,6 +362,97 @@ async function undoSwipe() {
 
 // Initialize
 checkAuth().then(fetchIdeas);
+
+// Feed management functions
+async function loadUserFeeds() {
+  try {
+    const res = await fetch('/api/feeds');
+    const feeds = await res.json();
+    const container = document.getElementById('userFeeds');
+    
+    if (!feeds.length) {
+      container.innerHTML = '<p style="color: #666;">No custom feeds yet. Add one below!</p>';
+      return;
+    }
+    
+    container.innerHTML = feeds.map(function(feed) {
+      const statusClass = feed.last_error ? 'feed-error' : (feed.enabled ? 'feed-active' : 'feed-disabled');
+      const statusText = feed.last_error ? '⚠️' : (feed.enabled ? '✓' : '○');
+      return '<div class="feed-item ' + statusClass + '">' +
+        '<div class="feed-info">' +
+          '<span class="feed-status">' + statusText + '</span>' +
+          '<span class="feed-name">' + escapeHtml(feed.name) + '</span>' +
+          '<span class="feed-category">' + escapeHtml(feed.category) + '</span>' +
+        '</div>' +
+        '<div class="feed-actions">' +
+          '<button onclick="toggleFeed(' + feed.id + ', ' + !feed.enabled + ')" class="feed-btn">' + 
+            (feed.enabled ? 'Disable' : 'Enable') + 
+          '</button>' +
+          '<button onclick="deleteFeed(' + feed.id + ')" class="feed-btn delete">Delete</button>' +
+        '</div>' +
+      '</div>';
+    }).join('');
+  } catch (e) {
+    console.error('Failed to load feeds:', e);
+  }
+}
+
+async function addFeed() {
+  const url = document.getElementById('newFeedUrl').value.trim();
+  const name = document.getElementById('newFeedName').value.trim();
+  const category = document.getElementById('newFeedCategory').value;
+  
+  if (!url || !name) {
+    alert('Please enter both URL and name');
+    return;
+  }
+  
+  try {
+    const res = await fetch('/api/feeds', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, name, category })
+    });
+    
+    const data = await res.json();
+    if (data.error) {
+      alert('Error: ' + data.error);
+      return;
+    }
+    
+    document.getElementById('newFeedUrl').value = '';
+    document.getElementById('newFeedName').value = '';
+    loadUserFeeds();
+  } catch (e) {
+    alert('Failed to add feed');
+  }
+}
+
+async function toggleFeed(feedId, enabled) {
+  try {
+    await fetch('/api/feeds/' + feedId, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled })
+    });
+    loadUserFeeds();
+  } catch (e) {
+    alert('Failed to update feed');
+  }
+}
+
+async function deleteFeed(feedId) {
+  if (!confirm('Delete this feed?')) return;
+  
+  try {
+    await fetch('/api/feeds/' + feedId, { method: 'DELETE' });
+    loadUserFeeds();
+  } catch (e) {
+    alert('Failed to delete feed');
+  }
+}
+
+
 
 
 
